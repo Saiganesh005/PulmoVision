@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Times New Roman", Times, serif;
+  --color-dark-mode-green: #2DD4BF;
+  --color-light-mode-green: #073B3A;
+}
+
+:root {
+  --bg-color: #F5F5F5;
+  --card-bg: #FFFFFF;
+  --text-color: #1F2937;
+  --primary-color: #14B8A6;
+  --secondary-text: #6B7280;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark {
+  --bg-color: #0D1117;
+  --card-bg: #161B22;
+  --text-color: #00FFD1;
+  --primary-color: #00FFD1;
+  --secondary-text: #C9D1D9;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
