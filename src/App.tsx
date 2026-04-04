@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { LayoutGrid, Upload, FileText, Settings as SettingsIcon, User, ChevronLeft, ChevronRight, Activity, History, LogOut, FlaskConical, Microscope, Layers } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { LayoutGrid, Upload, FileText, Settings as SettingsIcon, User, Activity, History, LogOut, FlaskConical, Microscope } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './services/firebase';
 import Settings from './Settings';
 import TestingPage from './TestingPage';
 import AnalysisPage from './AnalysisPage';
@@ -16,11 +18,8 @@ import PythonStatus from './PythonStatus';
 import { ThemeProvider } from './ThemeContext';
 
 const diseases = [
-  "NORMAL", "COVID", "PNEUMONIA", "VIRUS", "Viral Pneumonia",
-  "BACTERIA", "Bacterial Pneumonia", "SARS", "MERS",
-  "Infiltration", "Effusion", "Atelectasis", "Nodule", "Mass",
-  "Consolidation", "Cardiomegaly", "Lung Opacity", "Pneumothorax",
-  "Edema", "Emphysema", "Fibrosis", "Pleural Thickening", "Hernia", "Lung Infection"
+  "NORMAL", "PNEUMONIA", "LUNG OPACITY", "PLEURAL EFFUSION", "LUNG CANCER", 
+  "LUNG INFECTION", "PNEUMOTHORAX", "EMPHYSEMA", "PULMONARY FIBROSIS"
 ];
 
 const navItems = [
@@ -32,38 +31,37 @@ const navItems = [
 ];
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('isLoggedIn') === 'true');
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [logo, setLogo] = useState<string | null>(localStorage.getItem('logo'));
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activePage, setActivePage] = useState('Dashboard');
-  const [isModelTrained, setIsModelTrained] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
-  const [datasetItems, setDatasetItems] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [isClearing, setIsClearing] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [time, setTime] = useState(new Date().toLocaleTimeString());
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   React.useEffect(() => {
     const timer = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   React.useEffect(() => {
-    localStorage.setItem('isLoggedIn', String(isLoggedIn));
-  }, [isLoggedIn]);
-
-  React.useEffect(() => {
     if (logo) localStorage.setItem('logo', logo);
     else localStorage.removeItem('logo');
   }, [logo]);
 
-  const handleLogin = () => {
-    setIsLoggedIn(true);
-  };
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    localStorage.removeItem('isLoggedIn');
+  const handleLogout = async () => {
+    await signOut(auth);
     localStorage.removeItem('logo');
     setLogo(null);
   };
@@ -79,8 +77,10 @@ export default function App() {
     console.log("History, training, and testing data cleared.");
   };
 
-  if (!isLoggedIn) {
-    return <LoginPage onLogin={handleLogin} logo={logo} setLogo={setLogo} />;
+  if (loading) return <div className="h-screen flex items-center justify-center">Loading...</div>;
+
+  if (!user) {
+    return <LoginPage onLogin={() => {}} />;
   }
 
   const renderPage = () => {
@@ -88,13 +88,13 @@ export default function App() {
       case 'Preferences':
         return <Settings />;
       case 'Testing':
-        return <TestingPage isModelTrained={isModelTrained} setIsModelTrained={setIsModelTrained} datasetItems={datasetItems} />;
+        return <TestingPage setUploadedImage={setUploadedImage} setActivePage={setActivePage} />;
       case 'Analysis':
-        return <AnalysisPage uploadedImage={uploadedImage} />;
+        return <AnalysisPage uploadedImage={uploadedImage} setUploadedImage={setUploadedImage} addToHistory={(item) => setHistory(prev => [item, ...prev])} />;
       case 'History':
         return <HistoryPage history={history} clearHistory={clearHistory} isClearing={isClearing} successMessage={successMessage} onViewResults={() => setActivePage('Analysis')} />;
       case 'Account Profile':
-        return <AccountProfile />;
+        return <AccountProfile user={user} logo={logo} setLogo={setLogo} />;
       default:
         return (
           <>
@@ -107,11 +107,11 @@ export default function App() {
             <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="bg-gray-100 dark:bg-gray-900 p-6 rounded-xl border-2 border-gray-300 dark:border-dark-mode-green">
                 <h3 className="text-black dark:text-dark-mode-green">Total Scans</h3>
-                <p className="text-4xl font-bold text-black dark:text-dark-mode-green">0</p>
+                <p className="text-4xl font-bold text-black dark:text-dark-mode-green">{history.length}</p>
               </div>
               <div className="bg-gray-100 dark:bg-gray-900 p-6 rounded-xl border-2 border-gray-300 dark:border-dark-mode-green">
                 <h3 className="text-black dark:text-dark-mode-green">Normal Cases</h3>
-                <p className="text-4xl font-bold text-black dark:text-dark-mode-green">0</p>
+                <p className="text-4xl font-bold text-black dark:text-dark-mode-green">{history.filter(h => h.disease === 'NORMAL').length}</p>
               </div>
             </section>
 
@@ -119,12 +119,15 @@ export default function App() {
             <section>
               <h2 className="text-xl font-semibold mb-4 text-black dark:text-dark-mode-green">Lung Disease Analysis</h2>
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {diseases.map((disease) => (
-                  <div key={disease} className="bg-gray-100 dark:bg-gray-900 p-4 rounded-lg border-2 border-gray-300 dark:border-dark-mode-green hover:border-teal-600 dark:hover:border-teal-500 transition-colors">
-                    <p className="text-xs text-black dark:text-dark-mode-green truncate">{disease}</p>
-                    <p className="text-2xl font-bold text-black dark:text-dark-mode-green">0</p>
-                  </div>
-                ))}
+                {diseases.map((disease) => {
+                  const count = history.filter(h => h.disease === disease).length;
+                  return (
+                    <div key={disease} className={`bg-gray-100 dark:bg-gray-900 p-4 rounded-lg border-2 ${disease === 'NORMAL' ? 'border-emerald-500 dark:border-emerald-500' : 'border-red-500 dark:border-red-500'} hover:border-teal-600 dark:hover:border-teal-500 transition-colors`}>
+                      <p className={`text-xs ${disease === 'NORMAL' ? 'text-emerald-500' : 'text-red-500'} truncate`}>{disease}</p>
+                      <p className={`text-2xl font-bold ${disease === 'NORMAL' ? 'text-emerald-500' : 'text-red-500'}`}>{count}</p>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           </>
@@ -141,24 +144,14 @@ export default function App() {
       >
         <div className="flex items-center gap-3 mb-8">
           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-[var(--primary-color)]/20 rounded-lg">
-            {isSidebarOpen ? <ChevronLeft /> : <ChevronRight />}
+            {logo ? (
+              <img src={logo} alt="Logo" className="w-8 h-8 rounded-full" />
+            ) : (
+              <div className="w-8 h-8 bg-[var(--primary-color)] rounded-full flex items-center justify-center text-white font-bold">L</div>
+            )}
           </button>
           {isSidebarOpen && (
-            <>
-              {logo ? (
-                <img 
-                  src={logo} 
-                  alt="MedScan AI Logo" 
-                  className="h-10 w-10 rounded-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="h-10 w-10 rounded-full bg-[var(--bg-color)] flex items-center justify-center">
-                  <Upload className="text-[var(--secondary-text)]" size={20} />
-                </div>
-              )}
-              <span className="font-bold text-[var(--text-color)] text-lg">MedScan AI</span>
-            </>
+            <span className="font-bold text-[var(--text-color)] text-lg">MedScan AI</span>
           )}
         </div>
 

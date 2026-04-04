@@ -1,138 +1,93 @@
-from __future__ import annotations
-
-import argparse
-import logging
+import os
+import shutil
 from pathlib import Path
+from PIL import Image, ImageOps
+import torchvision.transforms as transforms
 
-try:
-    from PIL import Image, ImageOps
-except ImportError:
-    Image = None
-    ImageOps = None
+# Assuming target_dataset_path is available from previous cell execution
+# target_dataset_path = "/content/NIH_Chest_Xrays_Dataset"
 
-
-VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
-
-
-def preprocess_image(
-    input_path: Path,
-    output_path: Path,
-    size: tuple[int, int] = (224, 224),
-    equalize: bool = True,
-) -> None:
-    """Preprocess a single image and save it to output_path.
-
-    Steps:
-    1) Ensure image is RGB.
-    2) Apply optional histogram equalization to improve contrast.
-    3) Resize to target size.
+def preprocess_dataset_and_save(
+    input_root: Path,
+    output_root: Path,
+    image_size: tuple = (224, 224),
+    equalize: bool = False
+):
     """
-    if Image is None:
-        logging.warning(f"PIL not installed, skipping preprocessing for {input_path}")
-        return
-    with Image.open(input_path) as image:
-        image = image.convert("L")
-
-        if equalize:
-            image = ImageOps.equalize(image)
-
-        image = image.resize(size, Image.Resampling.LANCZOS)
-        image = image.convert("RGB")
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        image.save(output_path)
-
-
-def preprocess_dataset(
-    input_root: str | Path,
-    output_root: str | Path,
-    size: tuple[int, int] = (224, 224),
-    equalize: bool = True,
-) -> tuple[int, int]:
-    """Preprocess an image dataset while preserving directory structure.
-
-    Returns:
-        (processed_count, skipped_count)
+    Processes images from input_root, applies resizing and optional equalization,
+    and saves them as new image files to output_root, maintaining the directory structure.
     """
-    input_root = Path(input_root)
-    output_root = Path(output_root)
-
-    if not input_root.exists():
-        raise FileNotFoundError(f"Input directory does not exist: {input_root}")
-
+    output_root.mkdir(parents=True, exist_ok=True)
     processed_count = 0
     skipped_count = 0
 
-    for path in input_root.rglob("*"):
-        if not path.is_file():
-            continue
+    # Define the transforms that result in a PIL Image
+    pil_resize_transform = transforms.Resize(image_size)
 
-        if path.suffix.lower() not in VALID_EXTENSIONS:
-            skipped_count += 1
-            continue
-
-        relative = path.relative_to(input_root)
-        destination = output_root / relative
-
+    for dirpath, dirnames, filenames in os.walk(input_root):
+        # Construct relative path from input_root to current dirpath
         try:
-            preprocess_image(
-                input_path=path,
-                output_path=destination,
-                size=size,
-                equalize=equalize,
-            )
-            processed_count += 1
-        except OSError:
-            skipped_count += 1
+            relative_path = Path(dirpath).relative_to(input_root)
+        except ValueError:
+            # If dirpath is not a child of input_root (e.g., if input_root is a file),
+            # handle it by setting relative_path to an empty path.
+            relative_path = Path('.')
 
+        target_dir = output_root / relative_path
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        for filename in filenames:
+            # Process only common image file types
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')):
+                try:
+                    img_path = Path(dirpath) / filename
+                    # Open image and convert to RGB to handle various input formats consistently
+                    img = Image.open(img_path).convert('RGB')
+
+                    # Apply resizing transform
+                    img = pil_resize_transform(img)
+
+                    # Apply histogram equalization if requested
+                    if equalize:
+                        img = ImageOps.equalize(img)
+
+                    target_img_path = target_dir / filename
+                    img.save(target_img_path) # Save the processed PIL image
+                    processed_count += 1
+                except Exception as e:
+                    print(f"Skipping {img_path} due to error: {e}")
+                    skipped_count += 1
+            else:
+                skipped_count += 1
     return processed_count, skipped_count
 
+# --- Apply preprocessing to the NIH Chest X-rays dataset ---
+# The variable 'target_dataset_path' should be available from the execution of cell o2k0jrq2-6jZ
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Preprocess X-ray image datasets.")
-    parser.add_argument(
-        "--input-dir",
-        type=Path,
-        default=Path("/content/lung_detection"),
-        help="Path to dataset root (supports nested train/val/test/class folders).",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("/content/Preprocess_data"),
-        help="Path where preprocessed images are written.",
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=224,
-        help="Output image width.",
-    )
-    parser.add_argument(
-        "--height",
-        type=int,
-        default=224,
-        help="Output image height.",
-    )
-    parser.add_argument(
-        "--no-equalize",
-        action="store_true",
-        help="Disable histogram equalization.",
-    )
-    return parser.parse_args()
+if 'target_dataset_path' in globals():
+    nih_input_path = Path(target_dataset_path)
+    nih_output_path = Path("/content/NIH_Chest_Xrays_Preprocessed")
 
+    print(f"\nApplying preprocessing to NIH Chest X-rays dataset and saving to: {nih_output_path}")
 
-def main() -> None:
-    args = parse_args()
-    processed, skipped = preprocess_dataset(
-        input_root=args.input_dir,
-        output_root=args.output_dir,
-        size=(args.width, args.height),
-        equalize=not args.no_equalize,
+    IMG_SIZE = 224 # Set image size, consistent with common model input requirements
+
+    # Clean up previous data from target directory to ensure a clean run
+    if nih_output_path.exists():
+        print(f"Removing existing directory: {nih_output_path}")
+        shutil.rmtree(nih_output_path)
+
+    processed_nih, skipped_nih = preprocess_dataset_and_save(
+        input_root=nih_input_path,
+        output_root=nih_output_path,
+        image_size=(IMG_SIZE, IMG_SIZE),
+        equalize=True # Apply equalization
     )
-    print(f"Preprocessing complete. Processed: {processed}, Skipped: {skipped}")
-    print(f"Output directory: {args.output_dir}")
 
+    print(f"NIH Image preprocessing complete. Processed: {processed_nih}, Skipped: {skipped_nih}")
+    print(f"Preprocessed NIH Chest X-rays images saved to: {nih_output_path}")
 
-if __name__ == "__main__":
-    main()
+    # Make the path to the preprocessed NIH dataset available for subsequent cells
+    path_nih_preprocessed = nih_output_path
+else:
+    print("Error: 'target_dataset_path' for NIH dataset not found. Please ensure the dataset download cell (o2k0jrq2-6jZ) is executed.")

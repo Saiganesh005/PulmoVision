@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { User, Shield, Building, Camera, Save, X, Edit2 } from 'lucide-react';
 
-export default function AccountProfile() {
+export default function AccountProfile({ user, logo, setLogo }: { user: any, logo: string | null, setLogo: (logo: string | null) => void }) {
   const [isEditing, setIsEditing] = useState(false);
   const [profile, setProfile] = useState({
     name: 'Dr. John Doe',
     role: 'Radiologist',
-    email: 'john.doe@hospital.com',
+    email: user?.email || '',
     phone: '+1 234 567 890',
     org: 'City General Hospital',
     dept: 'Radiology',
@@ -50,10 +50,22 @@ export default function AccountProfile() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="flex flex-col items-center gap-4">
-            <div className="w-24 h-24 bg-gray-200 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-300 dark:border-dark-mode-green">
-              <Camera className="text-black dark:text-dark-mode-green" />
+            <div className="w-24 h-24 bg-gray-200 dark:bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-300 dark:border-dark-mode-green overflow-hidden">
+              {logo ? <img src={logo} alt="Avatar" className="w-full h-full object-cover" /> : <Camera className="text-black dark:text-dark-mode-green" />}
             </div>
-            {isEditing && <button className="text-sm text-teal-600 dark:text-teal-500">Change Avatar</button>}
+            {isEditing && (
+              <label className="cursor-pointer text-sm text-teal-600 dark:text-teal-500 hover:underline">
+                Change Avatar
+                <input type="file" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => setLogo(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }
+                }} accept="image/*" />
+              </label>
+            )}
           </div>
           <div className="space-y-4">
             <input type="text" value={profile.name} disabled={!isEditing} onChange={(e) => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-gray-200 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-dark-mode-green" />
@@ -77,7 +89,7 @@ export default function AccountProfile() {
           <h2 className="text-xl font-bold">Account Details</h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input type="text" value="UID: 12345-ABCDE" disabled className="w-full p-3 bg-gray-200 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-dark-mode-green opacity-70" />
+          <input type="text" value={`UID: ${user?.uid || 'N/A'}`} disabled className="w-full p-3 bg-gray-200 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-dark-mode-green opacity-70" />
           <input type="text" value={profile.org} disabled={!isEditing} onChange={(e) => setProfile({...profile, org: e.target.value})} className="w-full p-3 bg-gray-200 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-dark-mode-green" />
           <input type="text" value={profile.dept} disabled={!isEditing} onChange={(e) => setProfile({...profile, dept: e.target.value})} className="w-full p-3 bg-gray-200 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-dark-mode-green" />
           <input type="text" value={profile.location} disabled={!isEditing} onChange={(e) => setProfile({...profile, location: e.target.value})} className="w-full p-3 bg-gray-200 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-dark-mode-green" />

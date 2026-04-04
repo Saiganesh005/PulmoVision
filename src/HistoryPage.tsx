@@ -11,8 +11,8 @@ export default function HistoryPage({ history, clearHistory, isClearing, success
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           item.disease.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = filter === 'All' || 
-                          (filter === 'Normal' && item.disease === 'NORMAL') || 
-                          (filter === 'Diseased' && item.disease !== 'NORMAL');
+                          (filter === 'Normal' && item.disease === 'LUNG OPACITY') || 
+                          (filter === 'Diseased' && item.disease !== 'LUNG OPACITY');
     return matchesSearch && matchesFilter;
   }).sort((a, b) => {
     if (sortBy === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
@@ -55,7 +55,7 @@ export default function HistoryPage({ history, clearHistory, isClearing, success
           className="p-3 bg-[var(--bg-color)] rounded-lg border-2 border-[var(--primary-color)] text-[var(--text-color)]"
         >
           <option value="All">All Status</option>
-          <option value="Normal">Normal</option>
+          <option value="Normal">Lung Opacity</option>
           <option value="Diseased">Diseased</option>
         </select>
         <select 
@@ -123,7 +123,7 @@ export default function HistoryPage({ history, clearHistory, isClearing, success
                   <td className="p-4 text-sm text-[var(--secondary-text)]">{item.age} / {item.gender}</td>
                   <td className="p-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      item.disease === 'NORMAL' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 
+                      item.disease === 'LUNG OPACITY' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 
                       item.disease === 'TEST_RESULT' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
                       'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
                     }`}>

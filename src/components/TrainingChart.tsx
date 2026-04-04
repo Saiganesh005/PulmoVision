@@ -14,7 +14,8 @@ export default function TrainingChart() {
         }
         const contentType = res.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
-          throw new Error('Received invalid response format');
+          // If it's not JSON, it's likely the SPA fallback or a 404 page
+          throw new Error('Training history not found');
         }
         return res.json();
       })
@@ -31,8 +32,13 @@ export default function TrainingChart() {
         setData(formatted);
       })
       .catch(err => {
-        console.error("Failed to load history:", err);
-        setError(err.message);
+        // If the error is 'Training history not found', treat it as no data
+        if (err.message === 'Training history not found') {
+          setData([]);
+        } else {
+          console.error("Failed to load history:", err);
+          setError(err.message);
+        }
       });
   }, []);
 

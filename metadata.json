@@ -1,5 +1,5 @@
 {
   "name": "MedScan AI",
-  "description": "",
-  "requestFramePermissions": []
+  "description": "AI-powered medical image analysis tool with local testing and upload capabilities.",
+  "requestFramePermissions": ["camera"]
 }

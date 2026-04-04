@@ -6,7 +6,6 @@ import fs from "fs";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { Storage } from "@google-cloud/storage";
 import { glob } from "glob";
 
 async function startServer() {
@@ -19,9 +18,6 @@ async function startServer() {
     }
   });
   const PORT = 3000;
-
-  const storage = process.env.GCS_BUCKET_NAME ? new Storage() : null;
-  const bucketName = process.env.GCS_BUCKET_NAME;
 
   app.use(cors());
   app.use(express.json());
@@ -58,6 +54,29 @@ async function startServer() {
     }
   });
 
+  app.post("/api/run-model-testing", (req, res) => {
+    const scriptPath = path.join(process.cwd(), "model_testing.py");
+    if (!fs.existsSync(scriptPath)) {
+      return res.status(404).json({ error: "model_testing.py not found" });
+    }
+
+    const pyProcess = spawn("python3", [scriptPath]);
+    
+    pyProcess.stdout.on("data", (data) => {
+      console.log(`[model_testing.py]: ${data}`);
+    });
+
+    pyProcess.stderr.on("data", (data) => {
+      console.error(`[model_testing.py ERROR]: ${data}`);
+    });
+
+    pyProcess.on("close", (code) => {
+      console.log(`model_testing.py exited with code ${code}`);
+    });
+
+    res.json({ status: "started", message: "model_testing.py is running in the background" });
+  });
+
   // API Routes
   app.get("/api/datasets", (req, res) => {
     exec("(python3 backend/get_datasets.py || python backend/get_datasets.py)", (error, stdout, stderr) => {
@@ -72,19 +91,6 @@ async function startServer() {
         res.status(500).json({ error: "Failed to parse datasets", stdout });
       }
     });
-  });
-
-  app.post("/api/gcs/upload", async (req, res) => {
-    if (!storage || !bucketName) {
-      return res.status(500).json({ error: "GCS not configured" });
-    }
-    const { filePath, destination } = req.body;
-    try {
-      await storage.bucket(bucketName).upload(filePath, { destination });
-      res.json({ status: "success" });
-    } catch (error) {
-      res.status(500).json({ error: (error as Error).message });
-    }
   });
 
   app.get("/api/kaggle/download/status", (req, res) => {
@@ -206,19 +212,6 @@ except Exception as e:
         io.emit('download:status', download);
       } else {
         const targetDir = stdout.split("SUCCESS:")[1]?.trim();
-        if (targetDir && storage && bucketName) {
-            try {
-                const files = await glob(`${targetDir}/**/*`, { nodir: true });
-                for (const file of files) {
-                    const relativePath = path.relative(targetDir, file);
-                    await storage.bucket(bucketName).upload(file, {
-                        destination: `datasets/${datasetId.replace(/\//g, '_')}/${relativePath}`
-                    });
-                }
-            } catch (e) {
-                console.error("GCS upload failed:", e);
-            }
-        }
         download.status = 'Completed';
         download.progress = 100;
         download.speed = "0 KB/s";
@@ -634,12 +627,13 @@ except Exception as e:
   });
 
   app.post("/api/predict", (req, res) => {
-    const { imagePath } = req.body;
+    const { imagePath, modelPath } = req.body;
     if (!imagePath) {
       return res.status(400).json({ error: "imagePath is required" });
     }
-    console.log(`Running inference on ${imagePath}...`);
-    exec(`(python3 inference.py --image ${imagePath} || python inference.py --image ${imagePath})`, (error, stdout, stderr) => {
+    const modelArg = modelPath ? `--model ${modelPath}` : "";
+    console.log(`Running inference on ${imagePath} with model ${modelPath || 'default'}...`);
+    exec(`(python3 inference.py --image ${imagePath} ${modelArg} || python inference.py --image ${imagePath} ${modelArg})`, (error, stdout, stderr) => {
       if (error) {
         console.error(`Error: ${error.message}`);
         return res.status(500).json({ error: error.message, stderr });

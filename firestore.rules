@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required, immutable) - The user's UID
+    //   - medId: string (required) - The user's medical ID
+    //   - name: string (required) - The user's full name
+    //   - email: string (required) - The user's email address
+    //   - role: string (required) - The user's role (Doctor, Radiologist, Admin, Researcher)
+    //
+    // ===============================================================
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
+        (request.auth.token.email == "robbi.saiganeshdeviprasad05@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser() {
+      return hasOnlyAllowedFields(['uid', 'medId', 'name', 'email', 'role']) &&
+             hasRequiredFields(['uid', 'medId', 'name', 'email', 'role']) &&
+             request.resource.data.uid is string && request.resource.data.uid.size() > 0 && request.resource.data.uid.size() < 128 &&
+             request.resource.data.medId is string && request.resource.data.medId.size() > 0 && request.resource.data.medId.size() < 50 &&
+             request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() < 100 &&
+             request.resource.data.email is string && request.resource.data.email.size() > 0 && request.resource.data.email.size() < 100 &&
+             request.resource.data.role in ['Doctor', 'Radiologist', 'Admin', 'Researcher'];
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      
+      allow create: if isAuthenticated() && 
+                    isValidUser() && 
+                    uidUnchanged() &&
+                    ((isOwner(userId) && request.resource.data.role == 'Doctor') || isAdmin());
+                    
+      allow update: if isAuthenticated() && 
+                    isValidUser() && 
+                    uidNotModified() &&
+                    ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+    }
+    
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
