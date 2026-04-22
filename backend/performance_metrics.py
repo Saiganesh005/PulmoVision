@@ -1,135 +1,133 @@
-import torch
 import numpy as np
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
-from timm import create_model
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-import os
-import json
+import torch
 
-# --- Configuration ---
-MODEL_NAME = "fastvit_t8"
-BATCH_SIZE = 32
-IMG_SIZE = 224
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Paths based on previous dataset splitting and training
-TEST_DIR = "/content/datasplitting/test"
-CHECKPOINT_PATH = "best_model.pth"
+def get_eval_device(device: torch.device | str | None = None) -> torch.device:
+    """Return CUDA device if available, otherwise CPU."""
+    if device is not None:
+        return torch.device(device)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def calculate_specificity(cm):
+
+def compute_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, num_classes: int) -> np.ndarray:
+    """Build confusion matrix where rows=true classes and cols=predicted classes."""
+    cm = np.zeros((num_classes, num_classes), dtype=np.int64)
+    for true_label, pred_label in zip(y_true, y_pred):
+        cm[int(true_label), int(pred_label)] += 1
+    return cm
+
+
+def compute_metrics_from_confusion_matrix(cm: np.ndarray) -> dict:
     """
-    Calculates the specificity for each class given a confusion matrix.
-    Returns the macro-average specificity and a list of specificities per class.
+    Compute accuracy, macro precision, macro recall, and macro F1-score from confusion matrix.
     """
-    specificities = []
-    num_classes = cm.shape[0]
-    
-    for i in range(num_classes):
-        TP = cm[i, i]
-        FP = np.sum(cm[:, i]) - TP
-        FN = np.sum(cm[i, :]) - TP
-        TN = np.sum(cm) - (TP + FP + FN)
-        
-        # Specificity = TN / (TN + FP)
-        if (TN + FP) > 0:
-            specificity = TN / (TN + FP)
-        else:
-            specificity = 0.0
-            
-        specificities.append(specificity)
-        
-    # Return macro average and individual class specificities
-    return np.mean(specificities), specificities
+    true_positives = np.diag(cm).astype(np.float64)
+    predicted_positives = cm.sum(axis=0).astype(np.float64)
+    actual_positives = cm.sum(axis=1).astype(np.float64)
 
-def main():
-    print(f"Using device: {DEVICE}")
-    
-    if not os.path.exists(TEST_DIR):
-        print(f"Error: Test directory not found at {TEST_DIR}")
-        print("Please ensure the dataset splitting script has been executed.")
-        return
-        
-    if not os.path.exists(CHECKPOINT_PATH):
-        print(f"Error: Model checkpoint not found at {CHECKPOINT_PATH}")
-        print("Please ensure the model has been trained and saved.")
-        return
+    precision_per_class = np.divide(
+        true_positives,
+        predicted_positives,
+        out=np.zeros_like(true_positives),
+        where=predicted_positives > 0,
+    )
+    recall_per_class = np.divide(
+        true_positives,
+        actual_positives,
+        out=np.zeros_like(true_positives),
+        where=actual_positives > 0,
+    )
+    f1_per_class = np.divide(
+        2 * precision_per_class * recall_per_class,
+        precision_per_class + recall_per_class,
+        out=np.zeros_like(precision_per_class),
+        where=(precision_per_class + recall_per_class) > 0,
+    )
 
-    # --- Data Transforms ---
-    # Same normalization used during training
-    transform = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    accuracy = float(true_positives.sum() / max(cm.sum(), 1))
+    precision_macro = float(np.mean(precision_per_class))
+    recall_macro = float(np.mean(recall_per_class))
+    f1_macro = float(np.mean(f1_per_class))
 
-    # --- Dataset & Loader ---
-    test_dataset = datasets.ImageFolder(TEST_DIR, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-    class_names = test_dataset.classes
+    return {
+        "accuracy": accuracy,
+        "precision": precision_macro,
+        "recall": recall_macro,
+        "f1_score": f1_macro,
+        "precision_per_class": precision_per_class.tolist(),
+        "recall_per_class": recall_per_class.tolist(),
+        "f1_per_class": f1_per_class.tolist(),
+    }
 
-    print(f"Loaded test dataset with {len(test_dataset)} images across {len(class_names)} classes.")
 
-    # --- Model Initialization ---
-    print(f"Loading {MODEL_NAME} model from {CHECKPOINT_PATH}...")
-    model = create_model(MODEL_NAME, pretrained=False, num_classes=len(class_names))
-    model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=DEVICE))
-    model.to(DEVICE)
-    model.eval()
+def evaluate_validation_loader(
+    model: torch.nn.Module,
+    val_loader,
+    device: torch.device | str | None = None,
+    class_names: list[str] | None = None,
+) -> dict:
+    """
+    Evaluate model on validation DataLoader without gradient computation.
+
+    Args:
+        model: Trained model to evaluate.
+        val_loader: Validation DataLoader (should be shuffled=False to avoid leakage/order drift).
+        device: Optional evaluation device.
+        class_names: Optional class names aligned with class indices.
+
+    Returns:
+        Dictionary with:
+          - accuracy, precision, recall, f1_score
+          - confusion_matrix
+          - per-class precision/recall/f1
+    """
+    target_device = get_eval_device(device)
+    model = model.to(target_device)
+    model.eval()  # critical for leakage-safe validation (no training behavior)
 
     all_preds = []
     all_labels = []
 
-    print("Running inference on the test set. This may take a moment...")
-    with torch.no_grad():
-        for inputs, labels in test_loader:
-            inputs = inputs.to(DEVICE)
-            outputs = model(inputs)
-            preds = outputs.argmax(dim=1)
-            
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.numpy())
+    with torch.no_grad():  # no gradient computation during validation
+        for images, labels in val_loader:
+            images = images.to(target_device, non_blocking=True)
+            labels = labels.to(target_device, non_blocking=True)
 
-    # --- Calculate Metrics ---
-    # Multiply by 100 to get percentages
-    acc = accuracy_score(all_labels, all_preds) * 100
-    prec = precision_score(all_labels, all_preds, average='weighted', zero_division=0) * 100
-    rec = recall_score(all_labels, all_preds, average='weighted', zero_division=0) * 100
-    f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0) * 100
+            outputs = model(images)
+            preds = torch.argmax(outputs, dim=1)
 
-    # Confusion matrix for specificity
-    cm = confusion_matrix(all_labels, all_preds)
-    mean_spec, class_specs = calculate_specificity(cm)
-    mean_spec *= 100 # Convert macro average to percentage
+            all_preds.append(preds.cpu())
+            all_labels.append(labels.cpu())
 
-    # --- Output Results ---
-    print("\n" + "="*50)
-    print(" OVERALL PERFORMANCE METRICS (Percentages)")
-    print("="*50)
-    print(f" Accuracy    : {acc:.2f}%")
-    print(f" Precision   : {prec:.2f}%")
-    print(f" Recall      : {rec:.2f}%")
-    print(f" F1 Score    : {f1:.2f}%")
-    print(f" Specificity : {mean_spec:.2f}%")
-    print("="*50)
+    if not all_labels:
+        raise ValueError("Validation DataLoader is empty")
 
-    print("\n--- Class-wise Specificity ---")
-    for name, spec in zip(class_names, class_specs):
-        print(f" {name.ljust(20)} : {spec * 100:.2f}%")
-        
-    # Save metrics to a JSON file for easy access later
-    metrics_dict = {
-        "accuracy": float(acc),
-        "precision": float(prec),
-        "recall": float(rec),
-        "f1_score": float(f1),
-        "specificity_macro_avg": float(mean_spec),
-        "class_specificities": {name: float(spec * 100) for name, spec in zip(class_names, class_specs)}
+    y_pred = torch.cat(all_preds).numpy()
+    y_true = torch.cat(all_labels).numpy()
+
+    if class_names is not None:
+        num_classes = len(class_names)
+    else:
+        num_classes = int(max(np.max(y_true), np.max(y_pred)) + 1)
+        class_names = [f"class_{i}" for i in range(num_classes)]
+
+    cm = compute_confusion_matrix(y_true=y_true, y_pred=y_pred, num_classes=num_classes)
+    metrics = compute_metrics_from_confusion_matrix(cm)
+
+    result = {
+        "accuracy": metrics["accuracy"],
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "f1_score": metrics["f1_score"],
+        "confusion_matrix": cm.tolist(),
+        "per_class": {
+            class_name: {
+                "precision": metrics["precision_per_class"][index],
+                "recall": metrics["recall_per_class"][index],
+                "f1_score": metrics["f1_per_class"][index],
+            }
+            for index, class_name in enumerate(class_names)
+        },
     }
-    
-    with open("performance_results.json", "w") as f:
-        json.dump(metrics_dict, f, indent=4)
-    print("\nMetrics saved to performance_results.json")
 
-if __name__ == "__main__":
-    main()
+    return result
